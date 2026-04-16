@@ -68,14 +68,11 @@ class ProfileScreen extends ConsumerWidget {
 
             const Spacer(),
 
-            // Logout button
+            // Logout button - no-op pour l'instant (auth par email desactive)
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: () async {
-                  await ref.read(authServiceProvider).signOut();
-                  if (context.mounted) context.go('/login');
-                },
+                onPressed: null,
                 icon: const Icon(Icons.logout, color: AppColors.hotRed),
                 label: const Text(
                   'DECONNEXION',

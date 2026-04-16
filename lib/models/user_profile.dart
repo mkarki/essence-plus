@@ -18,14 +18,24 @@ class UserProfile {
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
+    T? pick<T>(String camel, String snake) =>
+        (json[camel] ?? json[snake]) as T?;
+
+    final createdAtRaw = pick<String>('createdAt', 'created_at');
+
     return UserProfile(
       id: json['id'] as String,
-      displayName: json['display_name'] as String,
-      avatarUrl: json['avatar_url'] as String?,
-      totalFuelCollected: json['total_fuel_collected'] as int? ?? 0,
-      gamesPlayed: json['games_played'] as int? ?? 0,
-      vouchersEarned: json['vouchers_earned'] as int? ?? 0,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      displayName:
+          pick<String>('displayName', 'display_name') ?? 'Joueur',
+      avatarUrl: pick<String>('avatarUrl', 'avatar_url'),
+      totalFuelCollected:
+          pick<int>('totalFuelCollected', 'total_fuel_collected') ?? 0,
+      gamesPlayed: pick<int>('gamesPlayed', 'games_played') ?? 0,
+      vouchersEarned:
+          pick<int>('vouchersEarned', 'vouchers_earned') ?? 0,
+      createdAt: createdAtRaw != null
+          ? DateTime.parse(createdAtRaw)
+          : DateTime.now(),
     );
   }
 
