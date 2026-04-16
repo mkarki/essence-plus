@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../game/essence_game.dart';
+import '../../../core/constants/game_config.dart';
+import '../../../game/hormuz_game.dart';
+import '../../../game/managers/powerup_manager.dart';
 import '../../../models/game_session.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/fuel_balance_provider.dart';
 import '../../../services/game_session_service.dart';
+import '../../../services/vhf_radio_service.dart';
 
 class GameScreen extends ConsumerStatefulWidget {
   const GameScreen({super.key});
@@ -17,24 +20,48 @@ class GameScreen extends ConsumerStatefulWidget {
 }
 
 class _GameScreenState extends ConsumerState<GameScreen> {
-  late EssenceGame _game;
+  late HormuzGame _game;
+  final VhfRadioService _radio = VhfRadioService();
   int _displayScore = 0;
-  int _displayFuel = 0;
+  int _displayBarrels = 0;
   bool _isGameOver = false;
   bool _isSubmitting = false;
+
+  String? _vhfMessage;
+  double _vhfMessageRemaining = 0;
 
   @override
   void initState() {
     super.initState();
-    _game = EssenceGame();
+    _game = HormuzGame();
     _game.onScoreChanged = () {
-      if (mounted) setState(() => _displayScore = _game.score);
+      if (mounted) {
+        setState(() {
+          _displayScore = _game.score;
+          if (_vhfMessageRemaining > 0) {
+            _vhfMessageRemaining -= 1 / 60; // approx
+            if (_vhfMessageRemaining <= 0) _vhfMessage = null;
+          }
+        });
+      }
     };
-    _game.onFuelCollected = () {
-      if (mounted) setState(() => _displayFuel = _game.fuelCollected);
+    _game.onBarrelCollected = () {
+      if (mounted) setState(() => _displayBarrels = _game.barrelsDelivered);
     };
     _game.onGameOver = () {
       if (mounted) setState(() => _isGameOver = true);
+    };
+    _game.onPowerupChanged = () {
+      if (mounted) setState(() {});
+    };
+    _game.onVhfAnnouncement = (msg, audioKey) {
+      if (mounted) {
+        setState(() {
+          _vhfMessage = msg;
+          _vhfMessageRemaining = GameConfig.vhfBannerDuration;
+        });
+        _radio.announce(audioKey);
+      }
     };
   }
 
@@ -46,11 +73,11 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (user != null) {
       final session = GameSession(
         userId: user.id,
-        fuelCollected: _game.fuelCollected,
+        fuelCollected: _game.barrelsDelivered,
         score: _game.score,
         distanceMeters: _game.distanceTraveled.toInt(),
         durationSeconds: _game.elapsedTime.toInt(),
-        obstaclesDodged: _game.obstaclesDodged,
+        obstaclesDodged: _game.hazardsDodged,
       );
 
       final service = GameSessionService();
@@ -64,15 +91,21 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     if (mounted) {
       context.pop({
         'score': _game.score,
-        'fuel': _game.fuelCollected,
+        'barrels': _game.barrelsDelivered,
         'distance': _game.distanceTraveled.toInt(),
-        'obstacles': _game.obstaclesDodged,
+        'hazards': _game.hazardsDodged,
+        'platforms': _game.platformsGrazed,
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final powerups = _game.isLoaded
+        ? _game.powerupManager.activeSnapshot
+        : <PowerupType, double>{};
+    final bribeReady = _game.isLoaded ? _game.powerupManager.bribeReady : false;
+
     return Scaffold(
       body: Stack(
         children: [
@@ -83,39 +116,49 @@ class _GameScreenState extends ConsumerState<GameScreen> {
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Score
-                  _HudBadge(
-                    icon: Icons.speed,
-                    value: '$_displayScore',
-                    color: AppColors.electricOrange,
-                  ),
-
-                  // Fuel collected
-                  _HudBadge(
-                    icon: Icons.local_gas_station,
-                    value: '+$_displayFuel',
-                    color: AppColors.neonGreen,
-                  ),
-
-                  // Pause button
-                  GestureDetector(
-                    onTap: () => _game.togglePause(),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface.withValues(alpha: 0.8),
-                        shape: BoxShape.circle,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _HudBadge(
+                        icon: Icons.speed,
+                        value: '$_displayScore',
+                        color: AppColors.electricOrange,
                       ),
-                      child: const Icon(
-                        Icons.pause,
-                        color: AppColors.textPrimary,
-                        size: 24,
+                      _HudBadge(
+                        icon: Icons.local_drink,
+                        value: '+$_displayBarrels brl',
+                        color: AppColors.tankerOrange,
                       ),
+                      GestureDetector(
+                        onTap: () => _game.togglePause(),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface.withValues(alpha: 0.8),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.pause,
+                            color: AppColors.textPrimary,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (powerups.isNotEmpty || bribeReady)
+                    _PowerupRow(
+                      active: powerups,
+                      bribeReady: bribeReady,
                     ),
-                  ),
+                  if (_vhfMessage != null) ...[
+                    const SizedBox(height: 12),
+                    _VhfBanner(message: _vhfMessage!),
+                  ],
                 ],
               ),
             ),
@@ -133,18 +176,18 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     color: AppColors.surface,
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: AppColors.electricOrange.withValues(alpha: 0.3),
+                      color: AppColors.tankerOrange.withValues(alpha: 0.3),
                     ),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'GAME OVER',
+                        'NAUFRAGE',
                         style: Theme.of(context)
                             .textTheme
                             .displaySmall
-                            ?.copyWith(color: AppColors.hotRed),
+                            ?.copyWith(color: AppColors.hazardRed),
                       ),
                       const SizedBox(height: 24),
                       _StatRow(
@@ -153,9 +196,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                         icon: Icons.speed,
                       ),
                       _StatRow(
-                        label: 'Essence',
-                        value: '+$_displayFuel',
-                        icon: Icons.local_gas_station,
+                        label: 'Barils livrés',
+                        value: '+$_displayBarrels',
+                        icon: Icons.local_drink,
                       ),
                       _StatRow(
                         label: 'Distance',
@@ -163,9 +206,14 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                         icon: Icons.straighten,
                       ),
                       _StatRow(
-                        label: 'Obstacles',
-                        value: '${_game.obstaclesDodged}',
+                        label: 'Hazards esquivés',
+                        value: '${_game.hazardsDodged}',
                         icon: Icons.shield_outlined,
+                      ),
+                      _StatRow(
+                        label: 'Plateformes frôlées',
+                        value: '${_game.platformsGrazed}',
+                        icon: Icons.factory_outlined,
                       ),
                       const SizedBox(height: 32),
                       Row(
@@ -191,7 +239,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                                 setState(() {
                                   _isGameOver = false;
                                   _displayScore = 0;
-                                  _displayFuel = 0;
+                                  _displayBarrels = 0;
+                                  _vhfMessage = null;
                                 });
                                 _game.restart();
                               },
@@ -271,8 +320,130 @@ class _StatRow extends StatelessWidget {
           Text(
             value,
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: AppColors.electricOrange,
+                  color: AppColors.tankerOrange,
                 ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PowerupRow extends StatelessWidget {
+  final Map<PowerupType, double> active;
+  final bool bribeReady;
+
+  const _PowerupRow({required this.active, required this.bribeReady});
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = <Widget>[];
+    for (final entry in active.entries) {
+      entries.add(_PowerupChip(
+        type: entry.key,
+        secondsLeft: entry.value,
+      ));
+    }
+    if (bribeReady) {
+      entries.add(const _PowerupChip(type: PowerupType.bribe, secondsLeft: 0));
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: entries,
+    );
+  }
+}
+
+class _PowerupChip extends StatelessWidget {
+  final PowerupType type;
+  final double secondsLeft;
+
+  const _PowerupChip({required this.type, required this.secondsLeft});
+
+  String get _label {
+    switch (type) {
+      case PowerupType.flag:
+        return 'Pavillon';
+      case PowerupType.coffee:
+        return 'Café';
+      case PowerupType.bribe:
+        return 'Bakchich';
+      case PowerupType.weather:
+        return 'Météo';
+      case PowerupType.foghorn:
+        return 'Corne';
+    }
+  }
+
+  Color get _color {
+    switch (type) {
+      case PowerupType.flag:
+        return Colors.blueAccent;
+      case PowerupType.coffee:
+        return const Color(0xFFD4A26B);
+      case PowerupType.bribe:
+        return AppColors.amberGold;
+      case PowerupType.weather:
+        return AppColors.naturalTeal;
+      case PowerupType.foghorn:
+        return AppColors.civilianGray;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showTimer = secondsLeft > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: _color.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        showTimer
+            ? '$_label · ${secondsLeft.toStringAsFixed(1)}s'
+            : '$_label · prêt',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class _VhfBanner extends StatelessWidget {
+  final String message;
+  const _VhfBanner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.oceanDeep.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.tankerOrange.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.radio,
+            color: AppColors.tankerOrange,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
           ),
         ],
       ),

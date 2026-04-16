@@ -85,5 +85,19 @@ void main() {
     test('speed limits are valid', () {
       expect(GameConfig.maxSpeed, greaterThan(GameConfig.initialSpeed));
     });
+
+    test('hazard category weights sum to a positive value', () {
+      final total = GameConfig.weightCivilian +
+          GameConfig.weightNatural +
+          GameConfig.weightPolitical;
+      expect(total, greaterThan(0));
+    });
+
+    test('platform bonus is much larger than a regular barrel drop', () {
+      expect(
+        GameConfig.platformBonusBarrels,
+        greaterThan(GameConfig.barrelsPerDrop * 5),
+      );
+    });
   });
 }

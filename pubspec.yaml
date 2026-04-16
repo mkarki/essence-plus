@@ -58,6 +58,7 @@ flutter:
     - assets/images/branding/
     - assets/audio/sfx/
     - assets/audio/music/
+    - assets/audio/vhf/
 
   # Fonts loaded via google_fonts package at runtime
   # To bundle offline, download Rajdhani from Google Fonts and add:

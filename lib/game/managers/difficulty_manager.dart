@@ -8,9 +8,9 @@ class DifficultyManager {
     return speed.clamp(GameConfig.initialSpeed, GameConfig.maxSpeed);
   }
 
-  /// Returns the obstacle spawn interval modifier (lower = more frequent).
-  double getObstacleIntervalModifier(double elapsedSeconds) {
-    // Gradually decrease interval (more obstacles over time)
+  /// Returns the hazard spawn interval modifier (lower = more frequent).
+  /// Used by SpawnManager to ramp difficulty over time.
+  double getHazardIntervalModifier(double elapsedSeconds) {
     final modifier = 1.0 - (elapsedSeconds / 300).clamp(0.0, 0.5);
     return modifier;
   }

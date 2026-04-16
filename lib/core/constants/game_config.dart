@@ -1,8 +1,9 @@
 abstract final class GameConfig {
   // Tank / Economy
   static const int tankCapacity = 1000;
-  static const int fuelPerDrop = 5;
-  static const int bonusFuelPerDrop = 2; // extra for streaks
+  static const int barrelsPerDrop = 5;
+  static const int bonusBarrelsPerDrop = 2; // extra for streaks
+  static const int platformBonusBarrels = 50;
 
   // Gameplay
   static const double initialSpeed = 200.0; // pixels per second
@@ -11,25 +12,56 @@ abstract final class GameConfig {
   static const int laneCount = 3;
   static const double laneWidth = 80.0;
 
-  // Spawning
-  static const double minObstacleInterval = 0.8; // seconds
-  static const double maxObstacleInterval = 2.5;
-  static const double minFuelDropInterval = 1.0;
-  static const double maxFuelDropInterval = 3.0;
+  // Spawning - hazards (general)
+  static const double minHazardInterval = 0.8; // seconds
+  static const double maxHazardInterval = 2.5;
 
-  // Vehicle
-  static const double vehicleWidth = 50.0;
-  static const double vehicleHeight = 80.0;
+  // Spawning - oil barrel drops
+  static const double minBarrelDropInterval = 1.0;
+  static const double maxBarrelDropInterval = 3.0;
+
+  // Spawning - oil platforms (offshore bonus)
+  static const double minPlatformInterval = 22.0;
+  static const double maxPlatformInterval = 40.0;
+
+  // Spawning - power-ups (rare)
+  static const double minPowerupInterval = 14.0;
+  static const double maxPowerupInterval = 28.0;
+
+  // Hazard category weights (out of 100)
+  static const int weightCivilian = 35;
+  static const int weightNatural = 35;
+  static const int weightPolitical = 30;
+
+  // Tanker
+  static const double tankerWidth = 56.0;
+  static const double tankerHeight = 110.0;
   static const double laneSwitchDuration = 0.2; // seconds
 
+  // Power-up durations (seconds)
+  static const double flagDuration = 5.0;
+  static const double coffeeDuration = 3.0;
+  static const double weatherDuration = 5.0;
+  static const double foghornDuration = 2.5;
+  static const double coffeeSpeedMultiplier = 1.6;
+
+  // Fog effect
+  static const double fogDuration = 3.0;
+  static const double fogOpacity = 0.55;
+
+  // VHF narrator
+  static const double vhfCooldownSeconds = 6.0;
+  static const double vhfBannerDuration = 4.5;
+
   // Anti-cheat thresholds
-  static const double maxFuelPerSecond = 3.0;
+  static const double maxBarrelsPerSecond = 8.0; // raised for platform bonuses
   static const int maxSessionsPerDay = 50;
   static const int minSessionDurationSeconds = 10;
   static const int voucherCooldownHours = 48;
 
   // Scoring
   static const int scorePerMeter = 1;
-  static const int scorePerFuelDrop = 10;
-  static const int scorePerObstacleDodged = 5;
+  static const int scorePerBarrel = 10;
+  static const int scorePerPlatformGraze = 50;
+  static const int scorePerHazardDodged = 5;
 }

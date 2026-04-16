@@ -14,10 +14,13 @@ const sessionLimiter = rateLimit({
 });
 
 // Anti-cheat thresholds
-const MAX_FUEL_PER_SECOND = 3.0;
+// Hormuz Run: barrels can spike from offshore platforms (+50 each, ~every 30s)
+// in addition to drops. Threshold raised so legit platform grazes don't trip
+// the rate check; daily/score caps still apply.
+const MAX_FUEL_PER_SECOND = 8.0;
 const MAX_SESSIONS_PER_DAY = 50;
 const MIN_DURATION_SECONDS = 10;
-const MAX_SCORE_PER_METER = 5;
+const MAX_SCORE_PER_METER = 12;
 
 // POST /api/game/session - submit game results
 router.post('/session', authMiddleware, sessionLimiter, async (req, res) => {
