@@ -2,7 +2,7 @@ abstract final class ApiConstants {
   // Base URL - switch via --dart-define=API_URL=...
   static const baseUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'http://localhost:3000/api',
+    defaultValue: 'https://essence-plus.onrender.com/api',
   );
 
   // Endpoints
@@ -14,6 +14,7 @@ abstract final class ApiConstants {
   static const gameSessions = '$baseUrl/game/sessions';
   static const leaderboard = '$baseUrl/game/leaderboard';
   static const claimVoucher = '$baseUrl/vouchers/claim';
+  static const lotteryVoucher = '$baseUrl/vouchers/lottery';
   static const myVouchers = '$baseUrl/vouchers';
   static const profile = '$baseUrl/profile';
 }

@@ -11,6 +11,10 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/fuel_balance_provider.dart';
 import '../../../services/game_session_service.dart';
 import '../../../services/vhf_radio_service.dart';
+import '../../../services/voucher_service.dart';
+import '../../../services/ad_service.dart';
+import '../../../providers/voucher_provider.dart';
+import '../../vouchers/screens/voucher_detail_screen.dart';
 
 class GameScreen extends ConsumerStatefulWidget {
   const GameScreen({super.key});
@@ -22,81 +26,164 @@ class GameScreen extends ConsumerStatefulWidget {
 class _GameScreenState extends ConsumerState<GameScreen> {
   late HormuzGame _game;
   final VhfRadioService _radio = VhfRadioService();
+  final AdService _ads = AdService();
+  final GameSessionService _sessionService = GameSessionService();
+  final VoucherService _voucherService = VoucherService();
+
   int _displayScore = 0;
   int _displayBarrels = 0;
   bool _isGameOver = false;
   bool _isSubmitting = false;
 
+  String? _submittedSessionId;
+  bool _lotteryTried = false;
+
   String? _vhfMessage;
   double _vhfMessageRemaining = 0;
+
+  // Lottery tuning - must stay in sync with server (vouchers.js)
+  static const int lotteryMinScore = 500;
+
+  void _deferredSetState(VoidCallback fn) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(fn);
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     _game = HormuzGame();
     _game.onScoreChanged = () {
-      if (mounted) {
-        setState(() {
-          _displayScore = _game.score;
-          if (_vhfMessageRemaining > 0) {
-            _vhfMessageRemaining -= 1 / 60; // approx
-            if (_vhfMessageRemaining <= 0) _vhfMessage = null;
-          }
-        });
-      }
+      _deferredSetState(() {
+        _displayScore = _game.score;
+        if (_vhfMessageRemaining > 0) {
+          _vhfMessageRemaining -= 1 / 60; // approx
+          if (_vhfMessageRemaining <= 0) _vhfMessage = null;
+        }
+      });
     };
     _game.onBarrelCollected = () {
-      if (mounted) setState(() => _displayBarrels = _game.barrelsDelivered);
+      _deferredSetState(() => _displayBarrels = _game.barrelsDelivered);
     };
     _game.onGameOver = () {
-      if (mounted) setState(() => _isGameOver = true);
+      _deferredSetState(() => _isGameOver = true);
+      _submitSessionInBackground();
     };
     _game.onPowerupChanged = () {
-      if (mounted) setState(() {});
+      _deferredSetState(() {});
     };
     _game.onVhfAnnouncement = (msg, audioKey) {
-      if (mounted) {
-        setState(() {
-          _vhfMessage = msg;
-          _vhfMessageRemaining = GameConfig.vhfBannerDuration;
-        });
-        _radio.announce(audioKey);
-      }
+      _deferredSetState(() {
+        _vhfMessage = msg;
+        _vhfMessageRemaining = GameConfig.vhfBannerDuration;
+      });
+      _radio.announce(audioKey);
     };
   }
 
-  Future<void> _submitAndReturn() async {
-    if (_isSubmitting) return;
-    setState(() => _isSubmitting = true);
+  Future<void> _submitSessionInBackground() async {
+    if (_isSubmitting || _submittedSessionId != null) return;
+    _isSubmitting = true;
 
     final user = ref.read(currentUserProvider);
-    if (user != null) {
-      final session = GameSession(
-        userId: user.id,
-        fuelCollected: _game.barrelsDelivered,
-        score: _game.score,
-        distanceMeters: _game.distanceTraveled.toInt(),
-        durationSeconds: _game.elapsedTime.toInt(),
-        obstaclesDodged: _game.hazardsDodged,
+    if (user == null) {
+      _isSubmitting = false;
+      return;
+    }
+
+    final session = GameSession(
+      userId: user.id,
+      fuelCollected: _game.barrelsDelivered,
+      score: _game.score,
+      distanceMeters: _game.distanceTraveled.toInt(),
+      durationSeconds: _game.elapsedTime.toInt(),
+      obstaclesDodged: _game.hazardsDodged,
+    );
+
+    final result = await _sessionService.submitSession(session);
+    if (!mounted) return;
+
+    if (result != null) {
+      ref.read(fuelBalanceProvider.notifier).updateBalance(result.fuelBalance);
+      setState(() => _submittedSessionId = result.sessionId);
+    }
+    _isSubmitting = false;
+  }
+
+  void _quitAndReturn() {
+    context.pop({
+      'score': _game.score,
+      'barrels': _game.barrelsDelivered,
+      'distance': _game.distanceTraveled.toInt(),
+      'hazards': _game.hazardsDodged,
+      'platforms': _game.platformsGrazed,
+    });
+  }
+
+  Future<void> _replayWithAd() async {
+    // Show interstitial between games - merci au sponsor
+    final watched = await _ads.showInterstitial(context);
+    if (!mounted) return;
+    setState(() {
+      _isGameOver = false;
+      _displayScore = 0;
+      _displayBarrels = 0;
+      _vhfMessage = null;
+      _submittedSessionId = null;
+      _lotteryTried = false;
+    });
+    _game.restart();
+    // We don't need `watched` - user already saw what they needed to
+    // ignore: unused_local_variable
+    final _ = watched;
+  }
+
+  Future<void> _openLottery({required bool withAdBoost}) async {
+    if (_submittedSessionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Envoi du score en cours, reessaie dans 1s'),
+        ),
       );
-
-      final service = GameSessionService();
-      final balance = await service.submitSession(session);
-
-      if (balance != null) {
-        ref.read(fuelBalanceProvider.notifier).updateBalance(balance);
-      }
+      return;
     }
 
-    if (mounted) {
-      context.pop({
-        'score': _game.score,
-        'barrels': _game.barrelsDelivered,
-        'distance': _game.distanceTraveled.toInt(),
-        'hazards': _game.hazardsDodged,
-        'platforms': _game.platformsGrazed,
-      });
+    // If user wants the ad boost, show rewarded ad first
+    if (withAdBoost) {
+      final ok = await _ads.showRewardedAd(
+        context,
+        rewardLabel: '+10% de chance de gagner un bon essence',
+      );
+      if (!mounted || !ok) return;
     }
+
+    // Call lottery endpoint
+    setState(() => _lotteryTried = true);
+
+    final result = await _voucherService.rollLottery(
+      sessionId: _submittedSessionId!,
+      adWatched: withAdBoost,
+    );
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _LotteryResultDialog(
+        result: result,
+        onViewVoucher: () {
+          Navigator.of(ctx).pop();
+          ref.invalidate(myVouchersProvider);
+          if (result.voucher != null) {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => VoucherDetailScreen(voucher: result.voucher!),
+              ),
+            );
+          }
+        },
+      ),
+    );
   }
 
   @override
@@ -215,35 +302,62 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                         value: '${_game.platformsGrazed}',
                         icon: Icons.factory_outlined,
                       ),
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 24),
+
+                      // Lottery CTA
+                      if (_game.score >= lotteryMinScore) ...[
+                        _LotteryCta(
+                          scored: _game.score,
+                          submitting: _submittedSessionId == null,
+                          triedAlready: _lotteryTried,
+                          onTry: () => _openLottery(withAdBoost: false),
+                          onTryWithAd: () => _openLottery(withAdBoost: true),
+                        ),
+                        const SizedBox(height: 20),
+                      ] else ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.lock_outline,
+                                color: AppColors.textSecondary,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Atteins $lotteryMinScore points pour tenter de gagner un bon essence',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: AppColors.textSecondary,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
                       Row(
                         children: [
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: _isSubmitting ? null : _submitAndReturn,
-                              child: _isSubmitting
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Text('QUITTER'),
+                              onPressed: _quitAndReturn,
+                              child: const Text('QUITTER'),
                             ),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
                             child: ElevatedButton(
-                              onPressed: () {
-                                setState(() {
-                                  _isGameOver = false;
-                                  _displayScore = 0;
-                                  _displayBarrels = 0;
-                                  _vhfMessage = null;
-                                });
-                                _game.restart();
-                              },
+                              onPressed: _replayWithAd,
                               child: const Text('REJOUER'),
                             ),
                           ),
@@ -408,6 +522,201 @@ class _PowerupChip extends StatelessWidget {
           color: Colors.white,
           fontSize: 12,
           fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class _LotteryCta extends StatelessWidget {
+  final int scored;
+  final bool submitting;
+  final bool triedAlready;
+  final VoidCallback onTry;
+  final VoidCallback onTryWithAd;
+
+  const _LotteryCta({
+    required this.scored,
+    required this.submitting,
+    required this.triedAlready,
+    required this.onTry,
+    required this.onTryWithAd,
+  });
+
+  int get _baseChance {
+    final base = (scored / 100).floor();
+    return base.clamp(1, 15);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColors.amberGold.withValues(alpha: 0.2),
+            AppColors.tankerOrange.withValues(alpha: 0.15),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.amberGold.withValues(alpha: 0.5),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.card_giftcard,
+                color: AppColors.amberGold,
+                size: 24,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  triedAlready
+                      ? 'Deja tente pour cette partie'
+                      : 'Tirage au sort : $_baseChance% de chance',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: AppColors.amberGold,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Gagne un bon d\'achat essence reel',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+          ),
+          if (!triedAlready) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: submitting ? null : onTry,
+                icon: submitting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.casino, size: 18),
+                label: Text(
+                  submitting
+                      ? 'Envoi du score...'
+                      : 'Tenter ($_baseChance%)',
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.amberGold,
+                  side: const BorderSide(color: AppColors.amberGold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: submitting ? null : onTryWithAd,
+                icon: const Icon(Icons.play_circle_outline, size: 18),
+                label: Text('Regarde une pub (+10%) : ${_baseChance + 10}%'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.amberGold,
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LotteryResultDialog extends StatelessWidget {
+  final LotteryResult result;
+  final VoidCallback onViewVoucher;
+
+  const _LotteryResultDialog({
+    required this.result,
+    required this.onViewVoucher,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final won = result.won && result.voucher != null;
+
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: (won ? AppColors.neonGreen : AppColors.hazardRed)
+                    .withValues(alpha: 0.15),
+              ),
+              child: Icon(
+                won ? Icons.celebration : Icons.sentiment_neutral,
+                color: won ? AppColors.neonGreen : AppColors.hazardRed,
+                size: 44,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              won ? 'Jackpot !' : 'Pas cette fois',
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                    color: won ? AppColors.neonGreen : AppColors.textPrimary,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              won
+                  ? 'Tu viens de gagner un bon essence ${result.voucher!.displayValue} chez ${result.voucher!.stationPartner} !'
+                  : (result.error == 'network'
+                      ? 'Probleme de connexion, reessaie.'
+                      : 'Chance: ${result.chancePercent}%. Reessaie a la prochaine partie !'),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+            ),
+            const SizedBox(height: 24),
+            if (won)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: onViewVoucher,
+                  icon: const Icon(Icons.card_giftcard),
+                  label: const Text('VOIR MON BON'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.amberGold,
+                    foregroundColor: Colors.black,
+                  ),
+                ),
+              )
+            else
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ),
+          ],
         ),
       ),
     );

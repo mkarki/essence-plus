@@ -7,8 +7,8 @@ class GameSessionService {
   final _api = ApiClient();
 
   /// Submits a game session to the server for validation.
-  /// Returns the updated fuel balance if valid, null if rejected.
-  Future<FuelBalance?> submitSession(GameSession session) async {
+  /// Returns the submission result (balance + sessionId) or null if rejected.
+  Future<SessionSubmission?> submitSession(GameSession session) async {
     try {
       final data = await _api.post(
         ApiConstants.submitSession,
@@ -16,8 +16,11 @@ class GameSessionService {
       );
 
       if (data['valid'] == true && data['fuelBalance'] != null) {
-        return FuelBalance.fromJson(
-          data['fuelBalance'] as Map<String, dynamic>,
+        return SessionSubmission(
+          fuelBalance: FuelBalance.fromJson(
+            data['fuelBalance'] as Map<String, dynamic>,
+          ),
+          sessionId: (data['session'] as Map<String, dynamic>?)?['id'] as String?,
         );
       }
       return null;
@@ -48,4 +51,11 @@ class GameSessionService {
       return [];
     }
   }
+}
+
+class SessionSubmission {
+  final FuelBalance fuelBalance;
+  final String? sessionId;
+
+  const SessionSubmission({required this.fuelBalance, this.sessionId});
 }
