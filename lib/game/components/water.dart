@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:ui';
 import 'package:flame/components.dart';
+import 'package:flutter/painting.dart' show RadialGradient;
 import '../hormuz_game.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/game_config.dart';
@@ -29,7 +30,7 @@ class Water extends Component with HasGameReference<HormuzGame> {
     // Deep water gradient background (darker at edges)
     final bgRect = Rect.fromLTWH(0, 0, size.x, size.y);
     final bgPaint = Paint()
-      ..shader = const RadialGradient(
+      ..shader = RadialGradient(
         colors: [AppColors.oceanMid, AppColors.oceanDeep],
         radius: 0.9,
       ).createShader(bgRect);

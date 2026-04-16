@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
-import 'package:flutter/material.dart' show Colors;
+import 'package:flutter/material.dart' show Colors, TextPainter, TextSpan, TextStyle, TextDirection, FontWeight;
 import '../../../core/constants/app_colors.dart';
 import '../../hormuz_game.dart';
 import '../../managers/powerup_manager.dart';
@@ -135,7 +135,7 @@ class PowerupDrop extends PositionComponent
     final tp = TextPainter(
       text: TextSpan(
         text: _label,
-        style: const TextStyle(
+        style: TextStyle(
           color: Colors.white,
           fontSize: 18,
           fontWeight: FontWeight.bold,

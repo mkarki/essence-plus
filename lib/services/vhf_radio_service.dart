@@ -17,7 +17,7 @@ class VhfRadioService {
     try {
       // Optional radio chirp before the line. Best-effort; if absent we skip.
       try {
-        await FlameAudio.play('${_basePath}$_chirpKey.mp3', volume: 0.5);
+        await FlameAudio.play('$_basePath$_chirpKey.mp3', volume: 0.5);
       } catch (_) {
         // chirp not bundled yet — ignore
       }

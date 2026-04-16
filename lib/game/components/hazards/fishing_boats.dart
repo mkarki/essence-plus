@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:ui';
 import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
@@ -9,7 +8,6 @@ import 'hazard.dart';
 
 /// Cluster of fishing boats. Disperses (gets removed) if foghorn is active.
 class FishingBoats extends Hazard with CollisionCallbacks {
-  final _random = Random();
   bool _dispersed = false;
 
   FishingBoats({required Vector2 position})
