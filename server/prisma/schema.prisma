@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String   @id @default(uuid())
+  email              String   @unique
+  passwordHash       String   @map("password_hash")
+  displayName        String   @map("display_name")
+  avatarUrl          String?  @map("avatar_url")
+  totalFuelCollected Int      @default(0) @map("total_fuel_collected")
+  gamesPlayed        Int      @default(0) @map("games_played")
+  vouchersEarned     Int      @default(0) @map("vouchers_earned")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  gameSessions        GameSession[]
+  fuelBalance         FuelBalance?
+  claimedVouchers     Voucher[]
+  voucherRedemptions  VoucherRedemption[]
+
+  @@map("users")
+}
+
+model GameSession {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  fuelCollected    Int      @map("fuel_collected")
+  score            Int
+  distanceMeters   Int      @map("distance_meters")
+  durationSeconds  Int      @map("duration_seconds")
+  obstaclesDodged  Int      @map("obstacles_dodged")
+  serverValidated  Boolean  @default(false) @map("server_validated")
+  flaggedSuspicious Boolean @default(false) @map("flagged_suspicious")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("game_sessions")
+}
+
+model FuelBalance {
+  userId       String   @id @map("user_id")
+  currentFuel  Int      @default(0) @map("current_fuel")
+  tankCapacity Int      @default(1000) @map("tank_capacity")
+  lastUpdated  DateTime @default(now()) @map("last_updated")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("fuel_balances")
+}
+
+model Voucher {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  valueAmount    Float     @map("value_amount")
+  currency       String    @default("MAD")
+  stationPartner String    @map("station_partner")
+  status         String    @default("available") // available, claimed, redeemed, expired
+  claimedById    String?   @map("claimed_by")
+  claimedAt      DateTime? @map("claimed_at")
+  expiresAt      DateTime  @map("expires_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  claimedBy           User?               @relation(fields: [claimedById], references: [id])
+  voucherRedemptions  VoucherRedemption[]
+
+  @@index([status])
+  @@map("vouchers")
+}
+
+model VoucherRedemption {
+  id        String   @id @default(uuid())
+  voucherId String   @map("voucher_id")
+  userId    String   @map("user_id")
+  fuelSpent Int      @map("fuel_spent")
+  redeemedAt DateTime @default(now()) @map("redeemed_at")
+
+  voucher Voucher @relation(fields: [voucherId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("voucher_redemptions")
+}
