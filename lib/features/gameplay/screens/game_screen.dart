@@ -13,6 +13,7 @@ import '../../../services/game_session_service.dart';
 import '../../../services/vhf_radio_service.dart';
 import '../../../services/voucher_service.dart';
 import '../../../services/ad_service.dart';
+import '../../../services/player_progression.dart';
 import '../../../providers/voucher_provider.dart';
 import '../../vouchers/screens/voucher_detail_screen.dart';
 
@@ -32,11 +33,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
 
   int _displayScore = 0;
   int _displayBarrels = 0;
+  int _displayCombo = 1;
+  int _displayNitro = GameConfig.nitroStartCharges;
+  bool _displayAnchorReady = true;
   bool _isGameOver = false;
   bool _isSubmitting = false;
 
   String? _submittedSessionId;
   bool _lotteryTried = false;
+  PostRunReport? _postRunReport;
+  bool _revived = false;
 
   String? _vhfMessage;
   double _vhfMessageRemaining = 0;
@@ -57,6 +63,9 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     _game.onScoreChanged = () {
       _deferredSetState(() {
         _displayScore = _game.score;
+        _displayCombo = _game.comboMultiplier;
+        _displayNitro = _game.nitroCharges;
+        _displayAnchorReady = _game.anchorReady;
         if (_vhfMessageRemaining > 0) {
           _vhfMessageRemaining -= 1 / 60; // approx
           if (_vhfMessageRemaining <= 0) _vhfMessage = null;
@@ -64,11 +73,15 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       });
     };
     _game.onBarrelCollected = () {
-      _deferredSetState(() => _displayBarrels = _game.barrelsDelivered);
+      _deferredSetState(() {
+        _displayBarrels = _game.barrelsDelivered;
+        _displayCombo = _game.comboMultiplier;
+      });
     };
     _game.onGameOver = () {
       _deferredSetState(() => _isGameOver = true);
       _submitSessionInBackground();
+      _finalizeRunLocally();
     };
     _game.onPowerupChanged = () {
       _deferredSetState(() {});
@@ -78,7 +91,8 @@ class _GameScreenState extends ConsumerState<GameScreen> {
         _vhfMessage = msg;
         _vhfMessageRemaining = GameConfig.vhfBannerDuration;
       });
-      _radio.announce(audioKey);
+      // Fire-and-forget; swallow any async error so the game loop never freezes.
+      _radio.announce(audioKey).catchError((_) {});
     };
   }
 
@@ -121,6 +135,35 @@ class _GameScreenState extends ConsumerState<GameScreen> {
     });
   }
 
+  Future<void> _finalizeRunLocally() async {
+    final report = await PlayerProgression.instance.finalizeRun(
+      score: _game.score,
+      barrelsCollected: _game.barrelsDelivered,
+      hazardsDodged: _game.hazardsDodged,
+      platformsGrazed: _game.platformsGrazed,
+      comboMax: _game.bestComboThisRun,
+      nitrosUsed: _game.nitrosUsedThisRun,
+      distanceMeters: _game.distanceTraveled.toInt(),
+    );
+    if (!mounted) return;
+    setState(() => _postRunReport = report);
+  }
+
+  /// Watch a rewarded ad to revive in place. Only available once per run.
+  Future<void> _reviveWithAd() async {
+    if (_revived) return;
+    final ok = await _ads.showRewardedAd(
+      context,
+      rewardLabel: 'Repartir en place avec ton score actuel',
+    );
+    if (!ok || !mounted) return;
+    _revived = true;
+    setState(() {
+      _isGameOver = false;
+    });
+    _game.gameState = GameState.playing;
+  }
+
   Future<void> _replayWithAd() async {
     // Show interstitial between games - merci au sponsor
     final watched = await _ads.showInterstitial(context);
@@ -129,9 +172,12 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       _isGameOver = false;
       _displayScore = 0;
       _displayBarrels = 0;
+      _displayCombo = 1;
       _vhfMessage = null;
       _submittedSessionId = null;
       _lotteryTried = false;
+      _postRunReport = null;
+      _revived = false;
     });
     _game.restart();
     // We don't need `watched` - user already saw what they needed to
@@ -197,7 +243,16 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       body: Stack(
         children: [
           // Game
-          GameWidget(game: _game),
+          // Tap left/right to switch lanes (in addition to the in-game
+          // PanDetector). GestureDetector uses HitTestBehavior.translucent
+          // so pan events still reach the Flame detector beneath.
+          GestureDetector(
+            behavior: HitTestBehavior.deferToChild,
+            onTapDown: (details) {
+              _game.handleTapAtX(details.localPosition.dx);
+            },
+            child: GameWidget(game: _game),
+          ),
 
           // HUD
           SafeArea(
@@ -237,6 +292,10 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  if (_displayCombo > 1) ...[
+                    const SizedBox(height: 8),
+                    _ComboBadge(multiplier: _displayCombo),
+                  ],
                   if (powerups.isNotEmpty || bribeReady)
                     _PowerupRow(
                       active: powerups,
@@ -247,6 +306,60 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                     _VhfBanner(message: _vhfMessage!),
                   ],
                 ],
+              ),
+            ),
+          ),
+
+          // Bottom controls: frein / ancre on the left, nitro / boost right.
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 16,
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      children: [
+                        _ControlTap(
+                          icon: Icons.anchor,
+                          label: 'ANCRE',
+                          color: AppColors.oceanFoam,
+                          enabled: _displayAnchorReady,
+                          onTap: () => _game.dropAnchor(),
+                        ),
+                        const SizedBox(height: 10),
+                        _ControlPedal(
+                          icon: Icons.remove_circle_outline,
+                          label: 'FREIN',
+                          color: AppColors.hazardRed,
+                          onPressedChanged: (down) => _game.setBraking(down),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        _ControlTap(
+                          icon: Icons.rocket_launch,
+                          label: 'NITRO x$_displayNitro',
+                          color: AppColors.neonGreen,
+                          enabled: _displayNitro > 0,
+                          onTap: () => _game.fireNitro(),
+                        ),
+                        const SizedBox(height: 10),
+                        _ControlPedal(
+                          icon: Icons.bolt,
+                          label: 'BOOST',
+                          color: AppColors.amberGold,
+                          onPressedChanged: (down) => _game.setBoosting(down),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -302,7 +415,33 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                         value: '${_game.platformsGrazed}',
                         icon: Icons.factory_outlined,
                       ),
-                      const SizedBox(height: 24),
+                      if (_postRunReport != null)
+                        _PostRunReportWidget(report: _postRunReport!),
+                      const SizedBox(height: 20),
+
+                      // Revive via rewarded ad - one shot per run.
+                      if (!_revived) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _reviveWithAd,
+                            icon: const Icon(
+                              Icons.favorite,
+                              color: AppColors.neonGreen,
+                            ),
+                            label: const Text(
+                              'REGARDE UNE PUB POUR REVIVRE',
+                              style: TextStyle(color: AppColors.neonGreen),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(
+                                color: AppColors.neonGreen,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
 
                       // Lottery CTA
                       if (_game.score >= lotteryMinScore) ...[
@@ -716,6 +855,255 @@ class _LotteryResultDialog extends StatelessWidget {
                   child: const Text('OK'),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PostRunReportWidget extends StatelessWidget {
+  final PostRunReport report;
+  const _PostRunReportWidget({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (report.walletBarrelsEarned > 0)
+            Row(
+              children: [
+                const Icon(Icons.account_balance_wallet,
+                    color: AppColors.amberGold, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  '+${report.walletBarrelsEarned} barils au portefeuille',
+                  style: const TextStyle(
+                    color: AppColors.amberGold,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          for (final m in report.missionsCompleted)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.task_alt,
+                      color: AppColors.neonGreen, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Mission : $m',
+                      style: const TextStyle(color: AppColors.neonGreen),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          for (final a in report.achievementsUnlocked)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  const Icon(Icons.emoji_events,
+                      color: AppColors.amberGold, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Trophée : $a',
+                      style: const TextStyle(color: AppColors.amberGold),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComboBadge extends StatelessWidget {
+  final int multiplier;
+  const _ComboBadge({required this.multiplier});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.amberGold, AppColors.tankerOrange],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.amberGold.withValues(alpha: 0.45),
+            blurRadius: 14,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.whatshot, color: Colors.white, size: 18),
+          const SizedBox(width: 4),
+          Text(
+            'COMBO x$multiplier',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ControlTap extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _ControlTap({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 84,
+        height: 52,
+        decoration: BoxDecoration(
+          color: AppColors.surface.withValues(alpha: enabled ? 0.85 : 0.5),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: color.withValues(alpha: enabled ? 0.9 : 0.3),
+            width: 1.5,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 22,
+              color: enabled ? color : color.withValues(alpha: 0.35),
+            ),
+            Text(
+              label,
+              style: TextStyle(
+                color: enabled ? color : color.withValues(alpha: 0.35),
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ControlPedal extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final void Function(bool down) onPressedChanged;
+
+  const _ControlPedal({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onPressedChanged,
+  });
+
+  @override
+  State<_ControlPedal> createState() => _ControlPedalState();
+}
+
+class _ControlPedalState extends State<_ControlPedal> {
+  bool _down = false;
+
+  void _setDown(bool v) {
+    if (_down == v) return;
+    setState(() => _down = v);
+    widget.onPressedChanged(v);
+  }
+
+  @override
+  void dispose() {
+    if (_down) widget.onPressedChanged(false);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _setDown(true),
+      onTapUp: (_) => _setDown(false),
+      onTapCancel: () => _setDown(false),
+      onPanDown: (_) => _setDown(true),
+      onPanEnd: (_) => _setDown(false),
+      onPanCancel: () => _setDown(false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 80),
+        width: 84,
+        height: 84,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: _down
+              ? widget.color.withValues(alpha: 0.85)
+              : AppColors.surface.withValues(alpha: 0.75),
+          border: Border.all(
+            color: widget.color.withValues(alpha: _down ? 1.0 : 0.6),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: widget.color.withValues(alpha: _down ? 0.45 : 0.15),
+              blurRadius: _down ? 24 : 10,
+              spreadRadius: _down ? 2 : 0,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              widget.icon,
+              size: 30,
+              color: _down ? Colors.white : widget.color,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              widget.label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: _down ? Colors.white : widget.color,
+                letterSpacing: 1,
+              ),
+            ),
           ],
         ),
       ),

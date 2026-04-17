@@ -11,9 +11,10 @@ class StormWave extends Hazard with CollisionCallbacks {
   final int _direction; // -1 = push left, +1 = push right
   bool _triggered = false;
 
+  // 2 lanes wide - narrow enough to dodge by staying in the opposite lane.
   StormWave({required Vector2 position, required int direction})
       : _direction = direction,
-        super(position: position, size: Vector2(360, 24));
+        super(position: position, size: Vector2(160, 24));
 
   @override
   HazardCategory get category => HazardCategory.natural;

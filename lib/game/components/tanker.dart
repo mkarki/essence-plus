@@ -5,6 +5,7 @@ import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
 import '../../core/constants/game_config.dart';
 import '../../core/constants/app_colors.dart';
+import '../../services/player_progression.dart';
 import '../hormuz_game.dart';
 
 class Tanker extends PositionComponent with HasGameReference<HormuzGame> {
@@ -72,14 +73,22 @@ class Tanker extends PositionComponent with HasGameReference<HormuzGame> {
       ..quadraticBezierTo(w * 0.05, h * 0.18, w / 2, 0)
       ..close();
 
-    canvas.drawPath(hullPath, Paint()..color = AppColors.tankerOrange);
+    // Apply selected skin (falls back to classic colors if unknown).
+    final skin = TankerSkin.byId(
+          PlayerProgression.instance.selectedSkin,
+        ) ??
+        TankerSkin.byId('classic')!;
+    final hullColor = Color(skin.hullColor);
+    final deckColor = Color(skin.deckColor);
+
+    canvas.drawPath(hullPath, Paint()..color = hullColor);
 
     // Deck cargo area (darker)
     final deckRect = RRect.fromRectAndRadius(
       Rect.fromLTWH(w * 0.18, h * 0.22, w * 0.64, h * 0.5),
       const Radius.circular(4),
     );
-    canvas.drawRRect(deckRect, Paint()..color = AppColors.tankerDeck);
+    canvas.drawRRect(deckRect, Paint()..color = deckColor);
 
     // Cargo tank circles (3 circular hatches)
     final hatchPaint = Paint()..color = AppColors.oceanDeep.withValues(alpha: 0.6);

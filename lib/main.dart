@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'services/api_client.dart';
 import 'services/auth_service.dart';
+import 'services/player_progression.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +20,7 @@ void main() async {
   ));
 
   await ApiClient().init();
+  await PlayerProgression.instance.init();
   await _ensureGuestAccount();
 
   runApp(

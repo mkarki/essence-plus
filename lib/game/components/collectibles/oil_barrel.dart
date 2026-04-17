@@ -47,20 +47,19 @@ class OilBarrel extends PositionComponent
   ) {
     super.onCollisionStart(intersectionPoints, other);
     if (other is Tanker && !_collected) {
+      _collected = true; // flip guard first to prevent re-entrance
       game.collectBarrel(this);
     }
   }
 
   void collect() {
     _collected = true;
+    // Small pop animation then remove. No OpacityEffect — PositionComponent
+    // without HasPaint does not expose an `opacity` and the effect throws,
+    // which would freeze the game loop the first time a barrel is grabbed.
     add(
       ScaleEffect.to(
         Vector2.all(1.8),
-        EffectController(duration: 0.25),
-      ),
-    );
-    add(
-      OpacityEffect.fadeOut(
         EffectController(duration: 0.25),
         onComplete: removeFromParent,
       ),

@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/fuel_balance_provider.dart';
+import '../../../services/player_progression.dart';
 import '../widgets/tank_gauge.dart';
+import '../widgets/news_ticker.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -41,6 +43,44 @@ class HomeScreen extends ConsumerWidget {
                   ),
                   Row(
                     children: [
+                      StreamBuilder<void>(
+                        stream: PlayerProgression.instance.changes,
+                        builder: (_, __) => GestureDetector(
+                          onTap: () => context.push('/garage'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.amberGold.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: AppColors.amberGold
+                                    .withValues(alpha: 0.5),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.local_drink,
+                                  color: AppColors.amberGold,
+                                  size: 14,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '${PlayerProgression.instance.barrels}',
+                                  style: const TextStyle(
+                                    color: AppColors.amberGold,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                       IconButton(
                         onPressed: () => context.push('/vouchers'),
                         icon: const Icon(
@@ -60,7 +100,11 @@ class HomeScreen extends ConsumerWidget {
                 ],
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 12),
+
+              const NewsTicker(),
+
+              const SizedBox(height: 20),
 
               // Tank gauge
               Expanded(
@@ -169,14 +213,19 @@ class HomeScreen extends ConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   _NavButton(
+                    icon: Icons.directions_boat,
+                    label: 'Garage',
+                    onTap: () => context.push('/garage'),
+                  ),
+                  _NavButton(
                     icon: Icons.leaderboard_outlined,
                     label: 'Classement',
                     onTap: () => context.push('/leaderboard'),
                   ),
                   _NavButton(
-                    icon: Icons.history,
-                    label: 'Historique',
-                    onTap: () {},
+                    icon: Icons.card_giftcard,
+                    label: 'Bons',
+                    onTap: () => context.push('/vouchers'),
                   ),
                 ],
               ),

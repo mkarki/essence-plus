@@ -125,10 +125,17 @@ class SpawnManager {
         // Fog bank centered on the channel
         game.add(FogBank(position: Vector2(game.size.x / 2, -80)));
       default:
-        // Storm wave spans the whole channel; direction randomized
+        // Storm wave covers only 2 lanes - player can dodge by staying in
+        // the opposite outside lane. Random left/right side + push dir.
+        final onLeft = _random.nextBool();
         final direction = _random.nextBool() ? -1 : 1;
+        final centerX = game.size.x / 2;
+        // Left side covers lanes 0-1, right side covers lanes 1-2.
+        final waveX = onLeft
+            ? centerX - GameConfig.laneWidth * 0.5
+            : centerX + GameConfig.laneWidth * 0.5;
         game.add(StormWave(
-          position: Vector2(game.size.x / 2, -20),
+          position: Vector2(waveX, -20),
           direction: direction,
         ));
     }

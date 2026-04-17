@@ -36,7 +36,13 @@ abstract final class GameConfig {
   // Tanker
   static const double tankerWidth = 56.0;
   static const double tankerHeight = 110.0;
-  static const double laneSwitchDuration = 0.2; // seconds
+  static const double laneSwitchDuration = 0.32; // seconds
+  static const double tankerBoostMultiplier = 1.5; // hold-to-accelerate
+  static const double tankerBrakeMultiplier = 0.5; // hold-to-brake
+
+  // Controls
+  static const double panLaneThreshold = 45.0; // px of drag to switch lane
+  static const double tapCooldownSeconds = 0.15; // debounce between taps
 
   // Power-up durations (seconds)
   static const double flagDuration = 5.0;
@@ -64,4 +70,20 @@ abstract final class GameConfig {
   static const int scorePerBarrel = 10;
   static const int scorePerPlatformGraze = 50;
   static const int scorePerHazardDodged = 5;
+
+  // Combo system
+  static const double comboWindowSeconds = 3.5; // time to grab next barrel
+  static const int comboMaxMultiplier = 5;
+
+  // Nitro (instant boost, limited charges)
+  static const int nitroStartCharges = 3;
+  static const double nitroDuration = 1.5;
+  static const double nitroSpeedMultiplier = 2.2;
+
+  // Anchor (emergency stop)
+  static const double anchorDuration = 2.0;
+  static const double anchorCooldown = 12.0;
+
+  // Radar preview (power-up)
+  static const double radarDuration = 6.0;
 }

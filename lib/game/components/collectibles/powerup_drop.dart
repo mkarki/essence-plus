@@ -49,20 +49,18 @@ class PowerupDrop extends PositionComponent
   ) {
     super.onCollisionStart(intersectionPoints, other);
     if (other is Tanker && !_consumed) {
+      _consumed = true;
       game.collectPowerup(this);
     }
   }
 
   void consume() {
     _consumed = true;
+    // No OpacityEffect — PositionComponent without HasPaint mixin has no
+    // `opacity` setter and the effect throws, freezing the game loop.
     add(
       ScaleEffect.to(
         Vector2.all(1.6),
-        EffectController(duration: 0.25),
-      ),
-    );
-    add(
-      OpacityEffect.fadeOut(
         EffectController(duration: 0.25),
         onComplete: removeFromParent,
       ),
