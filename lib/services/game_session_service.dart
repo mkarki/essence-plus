@@ -24,8 +24,12 @@ class GameSessionService {
         );
       }
       return null;
-    } catch (e) {
-      return null;
+    } on ApiException catch (e) {
+      // Surface the error so the UI can show something actionable
+      // (too short, suspicious, daily cap, etc.).
+      throw SessionSubmissionException(e.message, statusCode: e.statusCode);
+    } catch (_) {
+      throw const SessionSubmissionException('Probleme de connexion');
     }
   }
 
@@ -58,4 +62,12 @@ class SessionSubmission {
   final String? sessionId;
 
   const SessionSubmission({required this.fuelBalance, this.sessionId});
+}
+
+class SessionSubmissionException implements Exception {
+  final String message;
+  final int? statusCode;
+  const SessionSubmissionException(this.message, {this.statusCode});
+  @override
+  String toString() => message;
 }

@@ -40,6 +40,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   bool _isSubmitting = false;
 
   String? _submittedSessionId;
+  String? _sessionError;
   bool _lotteryTried = false;
   PostRunReport? _postRunReport;
   bool _revived = false;
@@ -99,10 +100,27 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   Future<void> _submitSessionInBackground() async {
     if (_isSubmitting || _submittedSessionId != null) return;
     _isSubmitting = true;
+    if (mounted) setState(() => _sessionError = null);
 
-    final user = ref.read(currentUserProvider);
+    // If the guest user hasn't been created yet (e.g. backend was offline
+    // at launch), try to create it now. The request will no-op if the token
+    // is already valid.
+    var user = ref.read(currentUserProvider);
+    if (user == null) {
+      try {
+        await ref.read(authServiceProvider).fetchCurrentUser();
+        user = ref.read(currentUserProvider);
+      } catch (_) {
+        // ignore - we'll surface the error below
+      }
+    }
+
     if (user == null) {
       _isSubmitting = false;
+      if (mounted) {
+        setState(() => _sessionError =
+            'Pas connecte au serveur - reessaie dans quelques secondes');
+      }
       return;
     }
 
@@ -115,14 +133,25 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       obstaclesDodged: _game.hazardsDodged,
     );
 
-    final result = await _sessionService.submitSession(session);
-    if (!mounted) return;
-
-    if (result != null) {
-      ref.read(fuelBalanceProvider.notifier).updateBalance(result.fuelBalance);
-      setState(() => _submittedSessionId = result.sessionId);
+    try {
+      final result = await _sessionService.submitSession(session);
+      if (!mounted) return;
+      if (result != null) {
+        ref
+            .read(fuelBalanceProvider.notifier)
+            .updateBalance(result.fuelBalance);
+        setState(() {
+          _submittedSessionId = result.sessionId;
+          _sessionError = null;
+        });
+      }
+    } on SessionSubmissionException catch (e) {
+      if (mounted) {
+        setState(() => _sessionError = e.message);
+      }
+    } finally {
+      _isSubmitting = false;
     }
-    _isSubmitting = false;
   }
 
   void _quitAndReturn() {
@@ -175,6 +204,7 @@ class _GameScreenState extends ConsumerState<GameScreen> {
       _displayCombo = 1;
       _vhfMessage = null;
       _submittedSessionId = null;
+      _sessionError = null;
       _lotteryTried = false;
       _postRunReport = null;
       _revived = false;
@@ -186,10 +216,19 @@ class _GameScreenState extends ConsumerState<GameScreen> {
   }
 
   Future<void> _openLottery({required bool withAdBoost}) async {
+    // Try to finish the submission now if it hasn't landed yet.
+    if (_submittedSessionId == null) {
+      await _submitSessionInBackground();
+      if (!mounted) return;
+    }
+
     if (_submittedSessionId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Envoi du score en cours, reessaie dans 1s'),
+        SnackBar(
+          content: Text(
+            _sessionError ?? 'Score non envoye - reessaie dans quelques secondes',
+          ),
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
@@ -447,10 +486,13 @@ class _GameScreenState extends ConsumerState<GameScreen> {
                       if (_game.score >= lotteryMinScore) ...[
                         _LotteryCta(
                           scored: _game.score,
-                          submitting: _submittedSessionId == null,
+                          submitting: _submittedSessionId == null &&
+                              _sessionError == null,
+                          errorMessage: _sessionError,
                           triedAlready: _lotteryTried,
                           onTry: () => _openLottery(withAdBoost: false),
                           onTryWithAd: () => _openLottery(withAdBoost: true),
+                          onRetrySubmit: _submitSessionInBackground,
                         ),
                         const SizedBox(height: 20),
                       ] else ...[
@@ -670,16 +712,20 @@ class _PowerupChip extends StatelessWidget {
 class _LotteryCta extends StatelessWidget {
   final int scored;
   final bool submitting;
+  final String? errorMessage;
   final bool triedAlready;
   final VoidCallback onTry;
   final VoidCallback onTryWithAd;
+  final VoidCallback onRetrySubmit;
 
   const _LotteryCta({
     required this.scored,
     required this.submitting,
+    required this.errorMessage,
     required this.triedAlready,
     required this.onTry,
     required this.onTryWithAd,
+    required this.onRetrySubmit,
   });
 
   int get _baseChance {
@@ -736,42 +782,89 @@ class _LotteryCta extends StatelessWidget {
                 ),
           ),
           if (!triedAlready) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: submitting ? null : onTry,
-                icon: submitting
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.casino, size: 18),
-                label: Text(
-                  submitting
-                      ? 'Envoi du score...'
-                      : 'Tenter ($_baseChance%)',
+            if (errorMessage != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
                 ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.amberGold,
-                  side: const BorderSide(color: AppColors.amberGold),
+                decoration: BoxDecoration(
+                  color: AppColors.hazardRed.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: submitting ? null : onTryWithAd,
-                icon: const Icon(Icons.play_circle_outline, size: 18),
-                label: Text('Regarde une pub (+10%) : ${_baseChance + 10}%'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.amberGold,
-                  foregroundColor: Colors.black,
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      color: AppColors.hazardRed,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        errorMessage!,
+                        style: const TextStyle(
+                          color: AppColors.hazardRed,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onRetrySubmit,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('REESSAYER L\'ENVOI'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.hazardRed,
+                    side: const BorderSide(color: AppColors.hazardRed),
+                  ),
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: submitting ? null : onTry,
+                  icon: submitting
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.casino, size: 18),
+                  label: Text(
+                    submitting
+                        ? 'Envoi du score...'
+                        : 'Tenter ($_baseChance%)',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.amberGold,
+                    side: const BorderSide(color: AppColors.amberGold),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: submitting ? null : onTryWithAd,
+                  icon: const Icon(Icons.play_circle_outline, size: 18),
+                  label:
+                      Text('Regarde une pub (+10%) : ${_baseChance + 10}%'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.amberGold,
+                    foregroundColor: Colors.black,
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),
