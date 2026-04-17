@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import '../../core/constants/game_config.dart';
 import '../hormuz_game.dart';
+import '../components/cameos/political_cameo.dart';
 import '../components/collectibles/oil_barrel.dart';
 import '../components/collectibles/oil_platform.dart';
 import '../components/collectibles/powerup_drop.dart';
@@ -25,10 +26,12 @@ class SpawnManager {
   double _barrelTimer = 0;
   double _platformTimer = 0;
   double _powerupTimer = 0;
+  double _cameoTimer = 0;
   double _nextHazardTime = 2.0;
   double _nextBarrelTime = 1.2;
   double _nextPlatformTime = 12.0;
   double _nextPowerupTime = 18.0;
+  double _nextCameoTime = 20.0;
 
   SpawnManager({required this.game});
 
@@ -39,12 +42,23 @@ class SpawnManager {
     _powerupTimer += dt;
 
     if (_hazardTimer >= _nextHazardTime) {
-      _spawnHazard();
+      // Difficulty phase decides how many threats arrive at once.
+      final mult = game.difficultyManager.hazardIntervalMultiplier(
+        game.elapsedTime,
+      );
+      final count = game.difficultyManager.simultaneousHazards(
+        game.elapsedTime,
+        _random.nextDouble(),
+      );
+      for (var i = 0; i < count; i++) {
+        _spawnHazard();
+      }
       _hazardTimer = 0;
       _nextHazardTime = _randomBetween(
-        GameConfig.minHazardInterval,
-        GameConfig.maxHazardInterval,
-      );
+            GameConfig.minHazardInterval,
+            GameConfig.maxHazardInterval,
+          ) *
+          mult;
     }
     if (_barrelTimer >= _nextBarrelTime) {
       _spawnBarrel();
@@ -70,6 +84,24 @@ class SpawnManager {
         GameConfig.maxPowerupInterval,
       );
     }
+    _cameoTimer += dt;
+    if (_cameoTimer >= _nextCameoTime) {
+      _spawnCameo();
+      _cameoTimer = 0;
+      _nextCameoTime = _randomBetween(25.0, 50.0);
+    }
+  }
+
+  void _spawnCameo() {
+    final figure = Cameo.values[_random.nextInt(Cameo.values.length)];
+    final leftBank = _random.nextBool();
+    // 24px inside each edge so cameos feel rooted on the banks.
+    final x = leftBank ? 24.0 : game.size.x - 24.0;
+    game.add(PoliticalCameo(
+      figure: figure,
+      leftBank: leftBank,
+      position: Vector2(x, -80),
+    ));
   }
 
   // --- Hazards -------------------------------------------------------------
@@ -190,10 +222,12 @@ class SpawnManager {
     _barrelTimer = 0;
     _platformTimer = 0;
     _powerupTimer = 0;
+    _cameoTimer = 0;
     _nextHazardTime = 2.0;
     _nextBarrelTime = 1.2;
     _nextPlatformTime = 12.0;
     _nextPowerupTime = 18.0;
+    _nextCameoTime = 20.0;
   }
 
   double _randomBetween(double min, double max) {

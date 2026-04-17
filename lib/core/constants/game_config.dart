@@ -7,8 +7,8 @@ abstract final class GameConfig {
 
   // Gameplay
   static const double initialSpeed = 200.0; // pixels per second
-  static const double maxSpeed = 600.0;
-  static const double speedIncrementPerSecond = 2.0;
+  static const double maxSpeed = 750.0; // bumped for late-game chaos
+  static const double speedIncrementPerSecond = 3.2;
   static const int laneCount = 3;
   static const double laneWidth = 80.0;
 

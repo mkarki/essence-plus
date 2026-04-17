@@ -7,6 +7,7 @@ import 'components/water.dart';
 import 'components/collectibles/oil_barrel.dart';
 import 'components/collectibles/oil_platform.dart';
 import 'components/collectibles/powerup_drop.dart';
+import 'components/cameos/political_cameo.dart';
 import 'components/hazards/hazard.dart';
 import 'managers/spawn_manager.dart';
 import 'managers/difficulty_manager.dart';
@@ -308,6 +309,12 @@ class HormuzGame extends FlameGame
     _radarTimer = duration;
   }
 
+  /// Called by a PoliticalCameo when it reaches the tanker's line.
+  /// Dispatches the satirical VHF line through the existing narrator pipe.
+  void triggerCameo(PoliticalCameo cameo) {
+    onVhfAnnouncement?.call(cameo.figure.vhfLine, cameo.figure.vhfAudioKey);
+  }
+
   void grazePlatform(OilPlatform platform) {
     platformsGrazed++;
     barrelsDelivered += GameConfig.platformBonusBarrels;
@@ -393,6 +400,10 @@ class HormuzGame extends FlameGame
     children.whereType<OilPlatform>().toList().forEach((e) => e.removeFromParent());
     children.whereType<PowerupDrop>().toList().forEach((e) => e.removeFromParent());
     children.whereType<Hazard>().toList().forEach((e) => e.removeFromParent());
+    children
+        .whereType<PoliticalCameo>()
+        .toList()
+        .forEach((e) => e.removeFromParent());
 
     tanker.position = Vector2(getLaneX(1), size.y * 0.78);
     spawnManager.reset();
